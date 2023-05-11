@@ -1,0 +1,30 @@
+---
+name: connect_to_wallet.mahal
+description:
+dateCreated: May 11, 2023
+---
+
+<html>
+<div class="mt-6">
+	<h1>Connect to wallet</h1>
+	<div className="flex">
+		<button class="button is-primary mt-6 is-medium" @click="connectToWallet">Metamask</button>
+	</div>
+</div>
+</html>
+
+<script>
+import { Component } from "mahal";
+import { createWeb3Modal } from "@/utils";
+
+export default class extends Component {
+    async connectToWallet() {
+        const web3modal = createWeb3Modal();
+        const provider = await web3modal.connectTo("custom-metamask");
+        this.emit("connect", provider);
+    }
+}
+</script>
+
+<style>
+</style>

@@ -1,0 +1,43 @@
+---
+name: app.mahal
+description: This component is the main parent component which is used to initiate the app.
+dateCreated:
+---
+
+<html>
+<div class="container is-flex is-flex-direction-column is-align-items-center">
+	<div :if(isConnected) class="mt-6">
+		WalletAddress : {{walletAddress}}
+	</div>
+	<ConnectToWallet :else @connect="onConnectToWallet" />
+</div>
+</html>
+
+<script>
+import { Component, children, reactive } from "mahal";
+import MahalIntro from "@/components/mahal_intro.mahal";
+import ConnectToWallet from "@/components/connect_to_wallet.mahal";
+import { providers } from "ethers";
+
+@children({
+    MahalIntro,
+    ConnectToWallet,
+})
+export default class extends Component {
+    @reactive isConnected;
+
+    web3Provider: providers.Web3Provider;
+
+    @reactive walletAddress: string;
+
+    async onConnectToWallet(provider) {
+        this.isConnected = true;
+        const web3Provider = new providers.Web3Provider(provider);
+        this.web3Provider = web3Provider;
+        this.walletAddress = await this.web3Provider.getSigner().getAddress();
+    }
+}
+</script>
+
+<style>
+</style>

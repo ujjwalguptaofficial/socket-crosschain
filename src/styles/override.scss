@@ -1,0 +1,77 @@
+@import "bulma/bulma.sass";
+
+.is-cursor-pointer {
+    cursor: pointer;
+}
+
+.is-text-center {
+    text-align: center;
+}
+
+.is-height-100 {
+    height: 100%;
+}
+
+.is-heightfull {
+    height: 100%;
+}
+
+.is-widthfull {
+    width: 100%;
+}
+
+.is-text-info {
+    color: var(--info-color);
+}
+
+.is-text-danger {
+    color: var(--danger-color);
+}
+
+.has-text-nowrap {
+    white-space: nowrap;
+}
+
+.slow-spin {
+    -webkit-animation: fa-spin 6s infinite linear;
+    animation: fa-spin 6s infinite linear;
+}
+
+.line-between-word {
+
+    display: flex;
+    flex-direction: row;
+
+    &:before,
+    &:after {
+        content: "";
+        flex: 1 1;
+        border-bottom: 5px solid;
+        margin: auto;
+    }
+
+    &:before {
+        margin-right: 10px
+    }
+
+    &:after {
+        margin-left: 10px
+    }
+}
+
+
+:root {
+    --primary-color: #{$primary};
+    --secondary-color: #{$success};
+    --success-color: #{$success};
+    --info-color: #{$info};
+    --link-color: #{$link};
+    --danger-color: #{$danger};
+    --grey-lighter: #{$grey-lighter};
+    --red-color: #{$red};
+}
+
+.reverse-columns {
+    flex-direction: column-reverse;
+    display: flex;
+}
