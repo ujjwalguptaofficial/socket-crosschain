@@ -8,6 +8,10 @@ dateCreated:
 <div class="container is-flex is-flex-direction-column is-align-items-center">
 	<div :if(isConnected) class="mt-6">
 		WalletAddress : {{walletAddress}}
+		
+		<div class="mt-2 is-primary">
+			<button class="button" @click="transfer" :class="{'is-loading':isTransfering}">Transfer cross chain</button>
+		</div>
 	</div>
 	<ConnectToWallet :else @connect="onConnectToWallet" />
 </div>
@@ -18,6 +22,7 @@ import { Component, children, reactive } from "mahal";
 import MahalIntro from "@/components/mahal_intro.mahal";
 import ConnectToWallet from "@/components/connect_to_wallet.mahal";
 import { providers } from "ethers";
+import { ChainId, Socket, Path } from "@socket.tech/socket-v2-sdk";
 
 @children({
     MahalIntro,
@@ -29,12 +34,56 @@ export default class extends Component {
     web3Provider: providers.Web3Provider;
 
     @reactive walletAddress: string;
+    @reactive isTransfering = false;
 
     async onConnectToWallet(provider) {
         this.isConnected = true;
         const web3Provider = new providers.Web3Provider(provider);
         this.web3Provider = web3Provider;
         this.walletAddress = await this.web3Provider.getSigner().getAddress();
+    }
+
+    async transfer() {
+        this.isTransfering = true;
+        const socket = new Socket({
+            apiKey: "645b2c8c-5825-4930-baf3-d9b997fcd88c",
+        });
+
+        const web3Socket = socket.connect(this.web3Provider);
+
+        const tokenList = await socket.getTokenList({
+            fromChainId: ChainId.POLYGON_CHAIN_ID, // Ethereum Mainnet
+            toChainId: ChainId.MAINNET_CHAIN_ID, // Polygon Mainnet,
+        });
+
+        console.log("tokenList", tokenList);
+
+        const ethOnFromChain = tokenList.from.tokenBySymbol("MATIC");
+        const ethOnToChain = tokenList.to.tokenBySymbol("MATIC");
+
+        const path = new Path({
+            fromToken: ethOnFromChain,
+            toToken: ethOnToChain,
+        });
+
+        const quote = await socket.getBestQuote({
+            path,
+            amount: "100", // 1 ETH
+            address: this.walletAddress,
+        });
+
+        console.log("quote", quote);
+
+        const tx = await web3Socket.start(quote, {
+            onDone: (activeRouteId) => {
+                console.log("Executing route complete", activeRouteId);
+            },
+            onTx(tx) {
+                console.log("tx", tx);
+            },
+        });
+
+        this.isTransfering = false;
     }
 }
 </script>

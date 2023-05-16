@@ -14,7 +14,7 @@
   "license": "",
   "private": "true",
   "dependencies": {
-    "@socket.tech/socket-v2-sdk": "^1.21.11",
+    "@socket.tech/socket-v2-sdk": "^1.21.12",
     "bulma": "^0.9.4",
     "ethers": "^5.7.2",
     "mahal": "^1.9.0",
