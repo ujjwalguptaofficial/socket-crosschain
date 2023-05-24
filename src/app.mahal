@@ -21,8 +21,9 @@ dateCreated:
 import { Component, children, reactive } from "mahal";
 import MahalIntro from "@/components/mahal_intro.mahal";
 import ConnectToWallet from "@/components/connect_to_wallet.mahal";
-import { providers } from "ethers";
+import { providers, BigNumber, constants } from "ethers";
 import { ChainId, Socket, Path } from "@socket.tech/socket-v2-sdk";
+import { SocketApiService } from "@/services";
 
 @children({
     MahalIntro,
@@ -36,6 +37,8 @@ export default class extends Component {
     @reactive walletAddress: string;
     @reactive isTransfering = false;
 
+    service = new SocketApiService();
+
     async onConnectToWallet(provider) {
         this.isConnected = true;
         const web3Provider = new providers.Web3Provider(provider);
@@ -43,8 +46,177 @@ export default class extends Component {
         this.walletAddress = await this.web3Provider.getSigner().getAddress();
     }
 
+    async getChains() {
+        const response = await this.service.getChains();
+        return response.result;
+    }
+
     async transfer() {
+        // this is our chainid
+        const fromChainId = 137;
+        const toChainId = 1;
+
+        // check if chainids are supported by socket
+
+        const chainAvailables: any[] = await this.getChains();
+        const chainIdNeeded = [fromChainId, toChainId];
+        let isNotSupported = false;
+        chainIdNeeded.forEach((chain) => {
+            if (!chainAvailables.find((q) => q.chainId == chain)) {
+                isNotSupported = true;
+            }
+        });
         this.isTransfering = true;
+
+        const responseForFromTokens = await this.service
+            .getFromTokensList(fromChainId, toChainId)
+            .then((response) => response.result);
+
+        const responseForToTokens = await this.service
+            .getToTokensList(fromChainId, toChainId)
+            .then((response) => response.result);
+
+        const tokenFrom = responseForFromTokens.find((token) => {
+            return token.symbol === "MATIC";
+        });
+        const tokenTo = responseForToTokens.find((token) => {
+            return token.symbol === "MATIC";
+        });
+
+        const quotes = await this.service
+            .getQuotes({
+                from: this.walletAddress,
+                to: this.walletAddress,
+                fromAmount: 100,
+                fromChainId: fromChainId,
+                toChainId: toChainId,
+                fromTokenAddress: tokenFrom.address,
+                toTokenAddress: tokenTo.address,
+            })
+            .then((response) => {
+                return response.result;
+            });
+        if (quotes.routes.length === 0) {
+            return alert("No quote found");
+        }
+
+        // route choosen - for simplicity let's choose first route
+        const routeChoosen = quotes.routes[0];
+        let routeStartResponse = await this.service.startRoute(
+            routeChoosen,
+            fromChainId,
+            toChainId,
+            tokenFrom.address,
+            tokenTo.address
+        );
+        const signer = this.web3Provider.getSigner();
+        return;
+        if (routeStartResponse.success) {
+            // execute first transaction
+
+            let userTxCount = routeStartResponse.totalUserTx;
+            let currentTxIndex = routeStartResponse.userTxIndex;
+            let activeRouteId = routeStartResponse.activeRouteId;
+            let status = "ready";
+            let txHash;
+
+            var handleTxExecution = async (payload) => {
+                const targetChainId = payload.chainId;
+
+                // switch to targetChainId if not
+
+                const approvalData = payload.approvalData;
+                // approve tx if approval data
+
+                if (approvalData) {
+                    // check if approval needed
+                    const {
+                        owner,
+                        allowanceTarget,
+                        approvalTokenAddress,
+                        minimumApprovalAmount,
+                    } = approvalData;
+                    const allowance = await this.service.getAllowance(
+                        targetChainId,
+                        owner,
+                        allowanceTarget,
+                        approvalTokenAddress
+                    );
+
+                    const allowanceValue = BigNumber.from(allowance.value);
+                    const minimumApprovalAmountBN = BigNumber.from(
+                        minimumApprovalAmount
+                    );
+                    // allownace is less than minimum required
+                    if (allowanceValue.lt(minimumApprovalAmount)) {
+                        // allow max value
+
+                        const approvalTxData =
+                            await this.service.getApprovalCallData(
+                                targetChainId,
+                                owner,
+                                allowanceTarget,
+                                approvalTokenAddress,
+                                constants.MaxUint256
+                            );
+
+                        const approvalTx = await signer.sendTransaction({
+                            data: approvalTxData,
+                            to: approvalTokenAddress,
+                        });
+                    }
+                }
+
+                // eth_sendTransaction
+                const tx = await signer.sendTransaction({
+                    data: payload.txData,
+                    to: payload.txTarget,
+                });
+                txHash = tx.hash;
+
+                executeAndCheck();
+            };
+
+            var executeAndCheck = async () => {
+                if (userTxCount === 0) {
+                    // tx finished
+                    return;
+                }
+
+                // wait for 1 second and then check for status
+                await new Promise((res) => {
+                    setTimeout(res, 1000);
+                });
+
+                // check for tx status
+                const response = await this.service.checkTxStatus(
+                    activeRouteId,
+                    currentTxIndex,
+                    txHash
+                );
+                debugger;
+                switch (response.result.toLowerCase()) {
+                    case "failed":
+                        alert("transaction failed");
+                    case "ready":
+                        //fetch tx data from build apiKey
+                        const response = await this.service.buildNextTx(
+                            activeRouteId
+                        );
+                        handleTxExecution(response.result);
+                        return;
+                    case "pending":
+                    case "completed":
+                    default:
+                        executeAndCheck();
+                }
+            };
+
+            handleTxExecution(routeStartResponse.result);
+        }
+
+        return;
+
         const socket = new Socket({
             apiKey: "645b2c8c-5825-4930-baf3-d9b997fcd88c",
         });
@@ -57,6 +229,7 @@ export default class extends Component {
         });
 
         console.log("tokenList", tokenList);
+        // return;
 
         const ethOnFromChain = tokenList.from.tokenBySymbol("MATIC");
         const ethOnToChain = tokenList.to.tokenBySymbol("MATIC");
