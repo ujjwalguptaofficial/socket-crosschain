@@ -52,6 +52,8 @@ export default class extends Component {
     }
 
     async transfer() {
+        this.isTransfering = true;
+
         // this is our chainid
         const fromChainId = 137;
         const toChainId = 1;
@@ -66,7 +68,6 @@ export default class extends Component {
                 isNotSupported = true;
             }
         });
-        this.isTransfering = true;
 
         const responseForFromTokens = await this.service
             .getFromTokensList(fromChainId, toChainId)
@@ -110,48 +111,62 @@ export default class extends Component {
             tokenTo.address
         );
         const signer = this.web3Provider.getSigner();
-        return;
         if (routeStartResponse.success) {
             // execute first transaction
 
-            let userTxCount = routeStartResponse.totalUserTx;
-            let currentTxIndex = routeStartResponse.userTxIndex;
-            let activeRouteId = routeStartResponse.activeRouteId;
+            const routeResult = routeStartResponse.result;
+
+            let userTxCount = routeResult.totalUserTx;
+            let currentTxIndex = routeResult.userTxIndex;
+            let activeRouteId = routeResult.activeRouteId;
             let status = "ready";
             let txHash;
 
             var handleTxExecution = async (payload) => {
                 const targetChainId = payload.chainId;
+                currentTxIndex = payload.userTxIndex;
 
                 // switch to targetChainId if not
+                const currentChainId = await signer.getChainId();
+                if (targetChainId !== currentChainId) {
+                    alert(
+                        `expected chainId ${targetChainId} but found ${currentChainId}`
+                    );
+                    return;
+                }
 
-                const approvalData = payload.approvalData;
+                const { approvalData, txTarget } = payload;
                 // approve tx if approval data
 
                 if (approvalData) {
                     // check if approval needed
-                    const {
+                    let {
                         owner,
                         allowanceTarget,
                         approvalTokenAddress,
                         minimumApprovalAmount,
                     } = approvalData;
-                    const allowance = await this.service.getAllowance(
+                    if (!allowanceTarget) {
+                        allowanceTarget = txTarget;
+                    }
+                    const allowanceResponse = await this.service.getAllowance(
                         targetChainId,
                         owner,
                         allowanceTarget,
                         approvalTokenAddress
                     );
 
+                    const allowance = allowanceResponse.result;
+
                     const allowanceValue = BigNumber.from(allowance.value);
                     const minimumApprovalAmountBN = BigNumber.from(
                         minimumApprovalAmount
                     );
                     // allownace is less than minimum required
-                    if (allowanceValue.lt(minimumApprovalAmount)) {
+                    if (allowanceValue.lt(minimumApprovalAmountBN)) {
                         // allow max value
 
-                        const approvalTxData =
+                        const approvalTxDataResponse =
                             await this.service.getApprovalCallData(
                                 targetChainId,
                                 owner,
@@ -159,18 +174,20 @@ export default class extends Component {
                                 approvalTokenAddress,
                                 constants.MaxUint256
                             );
-
+                        const payload = approvalTxDataResponse.result;
+                        debugger;
                         const approvalTx = await signer.sendTransaction({
-                            data: approvalTxData,
+                            data: payload.data,
                             to: approvalTokenAddress,
                         });
+                        approvalTx.wait();
                     }
                 }
 
                 // eth_sendTransaction
                 const tx = await signer.sendTransaction({
                     data: payload.txData,
-                    to: payload.txTarget,
+                    to: txTarget,
                 });
                 txHash = tx.hash;
 
@@ -178,7 +195,7 @@ export default class extends Component {
             };
 
             var executeAndCheck = async () => {
-                if (userTxCount === 0) {
+                if (currentTxIndex >= userTxCount) {
                     // tx finished
                     return;
                 }
@@ -187,28 +204,34 @@ export default class extends Component {
                 await new Promise((res) => {
                     setTimeout(res, 1000);
                 });
-
-                // check for tx status
-                const response = await this.service.checkTxStatus(
-                    activeRouteId,
-                    currentTxIndex,
-                    txHash
-                );
-                debugger;
-                switch (response.result.toLowerCase()) {
-                    case "failed":
-                        alert("transaction failed");
-                    case "ready":
-                        //fetch tx data from build apiKey
-                        const response = await this.service.buildNextTx(
-                            activeRouteId
-                        );
-                        handleTxExecution(response.result);
-                        return;
-                    case "pending":
-                    case "completed":
-                    default:
-                        executeAndCheck();
+                try {
+                    // check for tx status
+                    debugger;
+                    const response = await this.service.checkTxStatus(
+                        activeRouteId,
+                        currentTxIndex,
+                        txHash
+                    );
+                    debugger;
+                    switch (response.result.toLowerCase()) {
+                        case "failed":
+                            alert("transaction failed");
+                            break;
+                        case "ready":
+                            //fetch tx data from build apiKey
+                            const response = await this.service.buildNextTx(
+                                activeRouteId
+                            );
+                            handleTxExecution(response.result);
+                            return;
+                        case "pending":
+                        case "completed":
+                        default:
+                            executeAndCheck();
+                    }
+                } catch (ex) {
+                    console.log(ex);
+                    executeAndCheck();
                 }
             };
 
