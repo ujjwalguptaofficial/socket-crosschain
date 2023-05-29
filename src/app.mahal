@@ -21,7 +21,7 @@ dateCreated:
 import { Component, children, reactive } from "mahal";
 import MahalIntro from "@/components/mahal_intro.mahal";
 import ConnectToWallet from "@/components/connect_to_wallet.mahal";
-import { providers, BigNumber, constants } from "ethers";
+import { providers, BigNumber, constants, utils } from "ethers";
 import { ChainId, Socket, Path } from "@socket.tech/socket-v2-sdk";
 import { SocketApiService } from "@/services";
 
@@ -49,6 +49,26 @@ export default class extends Component {
     async getChains() {
         const response = await this.service.getChains();
         return response.result;
+    }
+
+    async switchToChainId(network) {
+        const { chainId, name, rpcs, explorers, currency } = network;
+        const walletProvider = this.web3Provider.provider as any;
+        const chainIdInhex = utils.hexValue(utils.hexlify(chainId));
+        await walletProvider.request({
+            id: 1,
+            jsonrpc: "2.0",
+            method: "wallet_addEthereumChain",
+            params: [
+                {
+                    chainId: chainIdInhex, //"0x5",
+                    rpcUrls: rpcs,
+                    chainName: name,
+                    blockExplorerUrls: explorers,
+                    nativeCurrency: currency,
+                },
+            ],
+        });
     }
 
     async transfer() {
@@ -129,10 +149,15 @@ export default class extends Component {
                 // switch to targetChainId if not
                 const currentChainId = await signer.getChainId();
                 if (targetChainId !== currentChainId) {
-                    alert(
-                        `expected chainId ${targetChainId} but found ${currentChainId}`
+                    // alert(
+                    //     `expected chainId ${targetChainId} but found ${currentChainId}`
+                    // );
+                    // return;
+
+                    const targetChain = chainAvailables.find(
+                        (q) => q.chainId == targetChainId
                     );
-                    return;
+                    await this.switchToChainId(targetChain);
                 }
 
                 const { approvalData, txTarget } = payload;
@@ -280,6 +305,10 @@ export default class extends Component {
         });
 
         this.isTransfering = false;
+    }
+
+    async onInit() {
+        window["app"] = this;
     }
 }
 </script>
