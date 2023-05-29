@@ -46,9 +46,14 @@ export default class extends Component {
         this.walletAddress = await this.web3Provider.getSigner().getAddress();
     }
 
+    chains = [];
+
     async getChains() {
-        const response = await this.service.getChains();
-        return response.result;
+        if (!this.chains.length) {
+            const response = await this.service.getChains();
+            this.chains = response.result;
+        }
+        return this.chains;
     }
 
     async switchToChainId(network) {
@@ -130,181 +135,148 @@ export default class extends Component {
             tokenFrom.address,
             tokenTo.address
         );
-        const signer = this.web3Provider.getSigner();
         if (routeStartResponse.success) {
             // execute first transaction
-
             const routeResult = routeStartResponse.result;
-
-            let userTxCount = routeResult.totalUserTx;
-            let currentTxIndex = routeResult.userTxIndex;
-            let activeRouteId = routeResult.activeRouteId;
-            let status = "ready";
-            let txHash;
-
-            var handleTxExecution = async (payload) => {
-                const targetChainId = payload.chainId;
-                currentTxIndex = payload.userTxIndex;
-
-                // switch to targetChainId if not
-                const currentChainId = await signer.getChainId();
-                if (targetChainId !== currentChainId) {
-                    // alert(
-                    //     `expected chainId ${targetChainId} but found ${currentChainId}`
-                    // );
-                    // return;
-
-                    const targetChain = chainAvailables.find(
-                        (q) => q.chainId == targetChainId
-                    );
-                    await this.switchToChainId(targetChain);
-                }
-
-                const { approvalData, txTarget } = payload;
-                // approve tx if approval data
-
-                if (approvalData) {
-                    // check if approval needed
-                    let {
-                        owner,
-                        allowanceTarget,
-                        approvalTokenAddress,
-                        minimumApprovalAmount,
-                    } = approvalData;
-                    if (!allowanceTarget) {
-                        allowanceTarget = txTarget;
-                    }
-                    const allowanceResponse = await this.service.getAllowance(
-                        targetChainId,
-                        owner,
-                        allowanceTarget,
-                        approvalTokenAddress
-                    );
-
-                    const allowance = allowanceResponse.result;
-
-                    const allowanceValue = BigNumber.from(allowance.value);
-                    const minimumApprovalAmountBN = BigNumber.from(
-                        minimumApprovalAmount
-                    );
-                    // allownace is less than minimum required
-                    if (allowanceValue.lt(minimumApprovalAmountBN)) {
-                        // allow max value
-
-                        const approvalTxDataResponse =
-                            await this.service.getApprovalCallData(
-                                targetChainId,
-                                owner,
-                                allowanceTarget,
-                                approvalTokenAddress,
-                                constants.MaxUint256
-                            );
-                        const payload = approvalTxDataResponse.result;
-                        debugger;
-                        const approvalTx = await signer.sendTransaction({
-                            data: payload.data,
-                            to: approvalTokenAddress,
-                        });
-                        approvalTx.wait();
-                    }
-                }
-
-                // eth_sendTransaction
-                const tx = await signer.sendTransaction({
-                    data: payload.txData,
-                    to: txTarget,
-                });
-                txHash = tx.hash;
-
-                executeAndCheck();
-            };
-
-            var executeAndCheck = async () => {
-                if (currentTxIndex >= userTxCount) {
-                    // tx finished
-                    return;
-                }
-
-                // wait for 1 second and then check for status
-                await new Promise((res) => {
-                    setTimeout(res, 1000);
-                });
-                try {
-                    // check for tx status
-                    debugger;
-                    const response = await this.service.checkTxStatus(
-                        activeRouteId,
-                        currentTxIndex,
-                        txHash
-                    );
-                    debugger;
-                    switch (response.result.toLowerCase()) {
-                        case "failed":
-                            alert("transaction failed");
-                            break;
-                        case "ready":
-                            //fetch tx data from build apiKey
-                            const response = await this.service.buildNextTx(
-                                activeRouteId
-                            );
-                            handleTxExecution(response.result);
-                            return;
-                        case "pending":
-                        case "completed":
-                        default:
-                            executeAndCheck();
-                    }
-                } catch (ex) {
-                    console.log(ex);
-                    executeAndCheck();
-                }
-            };
-
-            handleTxExecution(routeStartResponse.result);
+            this.handleTxExecution(routeResult);
         }
 
         return;
 
-        const socket = new Socket({
-            apiKey: "645b2c8c-5825-4930-baf3-d9b997fcd88c",
-        });
-
-        const web3Socket = socket.connect(this.web3Provider);
-
-        const tokenList = await socket.getTokenList({
-            fromChainId: ChainId.POLYGON_CHAIN_ID, // Ethereum Mainnet
-            toChainId: ChainId.MAINNET_CHAIN_ID, // Polygon Mainnet,
-        });
-
-        console.log("tokenList", tokenList);
-        // return;
-
-        const ethOnFromChain = tokenList.from.tokenBySymbol("MATIC");
-        const ethOnToChain = tokenList.to.tokenBySymbol("MATIC");
-
-        const path = new Path({
-            fromToken: ethOnFromChain,
-            toToken: ethOnToChain,
-        });
-
-        const quote = await socket.getBestQuote({
-            path,
-            amount: "100", // 1 ETH
-            address: this.walletAddress,
-        });
-
-        console.log("quote", quote);
-
-        const tx = await web3Socket.start(quote, {
-            onDone: (activeRouteId) => {
-                console.log("Executing route complete", activeRouteId);
-            },
-            onTx(tx) {
-                console.log("tx", tx);
-            },
-        });
-
         this.isTransfering = false;
+    }
+
+    async handleTxExecution(payload) {
+        const signer = this.web3Provider.getSigner();
+        const targetChainId = payload.chainId;
+        const currentTxIndex = payload.userTxIndex;
+        let userTxCount = payload.totalUserTx;
+        let activeRouteId = payload.activeRouteId;
+
+        const chainAvailables: any[] = await this.getChains();
+
+        // switch to targetChainId if not
+        const currentChainId = await signer.getChainId();
+        if (targetChainId !== currentChainId) {
+            // alert(
+            //     `expected chainId ${targetChainId} but found ${currentChainId}`
+            // );
+            // return;
+
+            const targetChain = chainAvailables.find(
+                (q) => q.chainId == targetChainId
+            );
+            debugger;
+            await this.switchToChainId(targetChain);
+        }
+
+        const { approvalData, txTarget } = payload;
+        // approve tx if approval data
+
+        if (approvalData) {
+            // check if approval needed
+            let {
+                owner,
+                allowanceTarget,
+                approvalTokenAddress,
+                minimumApprovalAmount,
+            } = approvalData;
+            if (!allowanceTarget) {
+                allowanceTarget = txTarget;
+            }
+            const allowanceResponse = await this.service.getAllowance(
+                targetChainId,
+                owner,
+                allowanceTarget,
+                approvalTokenAddress
+            );
+
+            const allowance = allowanceResponse.result;
+
+            const allowanceValue = BigNumber.from(allowance.value);
+            const minimumApprovalAmountBN = BigNumber.from(
+                minimumApprovalAmount
+            );
+            // allownace is less than minimum required
+            if (allowanceValue.lt(minimumApprovalAmountBN)) {
+                // allow max value
+
+                const approvalTxDataResponse =
+                    await this.service.getApprovalCallData(
+                        targetChainId,
+                        owner,
+                        allowanceTarget,
+                        approvalTokenAddress,
+                        constants.MaxUint256
+                    );
+                const payload = approvalTxDataResponse.result;
+                debugger;
+                const approvalTx = await signer.sendTransaction({
+                    data: payload.data,
+                    to: approvalTokenAddress,
+                });
+                approvalTx.wait();
+            }
+        }
+
+        // eth_sendTransaction
+        const tx = await signer.sendTransaction({
+            data: payload.txData,
+            to: txTarget,
+        });
+        const txHash = tx.hash;
+
+        localStorage.setItem("current_tx_index", currentTxIndex);
+        localStorage.setItem("user_tx_count", userTxCount);
+        localStorage.setItem("active_route_id", activeRouteId);
+        localStorage.setItem("tx_hash", txHash);
+        this.executeAndCheck();
+    }
+
+    async executeAndCheck() {
+        const currentTxIndex = localStorage.getItem("current_tx_index");
+        const userTxCount = localStorage.getItem("user_tx_count");
+        const activeRouteId = localStorage.getItem("active_route_id");
+        const txHash = localStorage.getItem("tx_hash");
+
+        if (currentTxIndex >= userTxCount) {
+            // tx finished
+            return;
+        }
+
+        // wait for 1 second and then check for status
+        await new Promise((res) => {
+            setTimeout(res, 1000);
+        });
+        try {
+            // check for tx status
+            debugger;
+            const response = await this.service.checkTxStatus(
+                activeRouteId,
+                currentTxIndex,
+                txHash
+            );
+            debugger;
+            switch (response.result.toLowerCase()) {
+                case "failed":
+                    alert("transaction failed");
+                    break;
+                case "ready":
+                    //fetch tx data from build apiKey
+                    const response = await this.service.buildNextTx(
+                        activeRouteId
+                    );
+                    this.handleTxExecution(response.result);
+                    return;
+                case "pending":
+                case "completed":
+                default:
+                    this.executeAndCheck();
+            }
+        } catch (ex) {
+            console.log(ex);
+            this.executeAndCheck();
+        }
     }
 
     async onInit() {
